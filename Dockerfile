@@ -17,11 +17,21 @@ RUN \
   echo "**** install runtime dependencies ****" && \
   apt-get update && \
   apt-get install -y \
-    git \
-    libatomic1 \
-    nano \
-    net-tools \
-    sudo && \
+  git \
+  libatomic1 \
+  nano \
+  net-tools \
+  gcc \
+  make \
+  curl \
+  tar \
+  unzip \
+  zip \
+  jq \
+  g++ \
+  lsof \
+  tmux \
+  sudo && \
   echo "**** install code-server ****" && \
   if [ -z ${CODE_RELEASE+x} ]; then \
     CODE_RELEASE=$(curl -sX GET https://api.github.com/repos/coder/code-server/releases/latest \
