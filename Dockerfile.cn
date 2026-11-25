@@ -1,0 +1,105 @@
+# 国内网络构建专用 Dockerfile（amd64）。
+# 原有 Dockerfile 保持不变；本文件通过 --build-arg 切换国内镜像源。
+#
+# 注意：刻意不使用 `# syntax=docker/dockerfile:1`，避免国内构建时额外从
+# Docker Hub 拉取 dockerfile 前端镜像（现代 Docker 默认内置前端已支持 ARG 前置 FROM）。
+#
+# 常用构建参数：
+#   --build-arg BASE_IMAGE=ghcr.nju.edu.cn/linuxserver/baseimage-ubuntu:noble
+#   --build-arg MIRROR=aliyun|ustc|tuna        （默认 official）
+#   --build-arg GHPROXY=https://ghfast.top/     （GitHub Release 加速前缀）
+#   --build-arg CODE_RELEASE=4.146.0            （固定版本，跳过 GitHub API）
+
+# ============================================================================
+# 基础镜像（可覆盖）：默认官方 GHCR；国内构建可换成 ghcr 镜像站
+# ============================================================================
+ARG BASE_IMAGE=ghcr.io/linuxserver/baseimage-ubuntu:noble
+
+FROM ${BASE_IMAGE}
+
+# set version label
+ARG BUILD_DATE
+ARG VERSION
+ARG CODE_RELEASE
+
+# ============================================================================
+# 国内构建加速参数（默认全部走官方源）
+# ============================================================================
+ARG MIRROR=official
+ARG APT_MIRROR_HOST=
+ARG GHPROXY=
+
+LABEL build_version="Linuxserver.io version:- ${VERSION} Build-date:- ${BUILD_DATE}"
+LABEL maintainer="aptalca"
+
+# environment settings
+ARG DEBIAN_FRONTEND="noninteractive"
+ENV HOME="/config"
+
+RUN \
+  echo "**** configure apt mirror (MIRROR=${MIRROR}) ****" && \
+  if [ -n "${APT_MIRROR_HOST}" ]; then \
+    APT_HOST="${APT_MIRROR_HOST}"; \
+  else \
+    case "${MIRROR}" in \
+      official) APT_HOST="" ;; \
+      aliyun)   APT_HOST="mirrors.aliyun.com" ;; \
+      ustc)     APT_HOST="mirrors.ustc.edu.cn" ;; \
+      tuna)     APT_HOST="mirrors.tuna.tsinghua.edu.cn" ;; \
+      *) echo "ERROR: unknown MIRROR='${MIRROR}', use official|aliyun|ustc|tuna or set APT_MIRROR_HOST" >&2; exit 1 ;; \
+    esac; \
+  fi && \
+  if [ -n "${APT_HOST}" ]; then \
+    echo ">>> 切换 apt 源到 ${APT_HOST}" && \
+    for f in /etc/apt/sources.list /etc/apt/sources.list.d/*.sources; do \
+      [ -f "$f" ] || continue; \
+      sed -i -E "s|//[A-Za-z0-9._-]*ubuntu[.]com|//${APT_HOST}|g" "$f"; \
+    done && \
+    echo ">>> 仍含 ubuntu.com 的条目（应为空；如有自定义源请留意）:" && \
+    ( grep -Rns "ubuntu[.]com" /etc/apt/sources.list /etc/apt/sources.list.d/ || true ); \
+  else \
+    echo ">>> 使用官方 apt 源"; \
+  fi && \
+  echo "**** install runtime dependencies ****" && \
+  apt-get update && \
+  apt-get install -y \
+  git \
+  libatomic1 \
+  nano \
+  net-tools \
+  gcc \
+  make \
+  curl \
+  tar \
+  unzip \
+  zip \
+  jq \
+  g++ \
+  lsof \
+  tmux \
+  sudo && \
+  echo "**** install code-server ****" && \
+  if [ -z ${CODE_RELEASE+x} ]; then \
+    CODE_RELEASE=$(curl -sX GET https://api.github.com/repos/coder/code-server/releases/latest \
+      | jq -r '.tag_name' | sed 's|^v||'); \
+  fi && \
+  mkdir -p /app/code-server && \
+  curl -o \
+    /tmp/code-server.tar.gz -L \
+    "${GHPROXY}https://github.com/coder/code-server/releases/download/v${CODE_RELEASE}/code-server-${CODE_RELEASE}-linux-amd64.tar.gz" && \
+  tar xf /tmp/code-server.tar.gz -C \
+    /app/code-server --strip-components=1 && \
+  printf "Linuxserver.io version: ${VERSION}\nBuild-date: ${BUILD_DATE}" > /build_version && \
+  echo "**** clean up ****" && \
+  apt-get clean && \
+  rm -rf \
+  /config/* \
+  /tmp/* \
+  /var/lib/apt/lists/* \
+  /var/tmp/*
+
+# add local files
+COPY /root /
+
+# ports and volumes
+EXPOSE 8443
